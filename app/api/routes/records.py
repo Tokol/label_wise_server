@@ -8,6 +8,8 @@ from app.db.session import get_db
 from app.models.analysis_record import AnalysisRecord
 from app.models.installation import Installation
 from app.schemas.record import (
+    AnalysisRecordBulkTrainingUpdateRequest,
+    AnalysisRecordBulkTrainingUpdateResponse,
     AnalysisRecordCreateRequest,
     AnalysisRecordCreateResponse,
     AnalysisRecordSummary,
@@ -48,6 +50,15 @@ def _require_installation(
     db.add(installation)
     db.flush()
     return installation
+
+
+def _set_training_eligibility(record: AnalysisRecord, usable_for_training: bool) -> None:
+    record.usable_for_training = usable_for_training
+    metadata = dict(record.payload.get("metadata") or {})
+    metadata["usable_for_training"] = usable_for_training
+    payload_json = dict(record.payload)
+    payload_json["metadata"] = metadata
+    record.payload = payload_json
 
 
 @router.post("", response_model=AnalysisRecordCreateResponse, status_code=status.HTTP_201_CREATED)
@@ -102,6 +113,30 @@ def list_records(include_payload: bool = False, db: Session = Depends(get_db)):
     ]
 
 
+@router.patch("/training-eligibility/bulk", response_model=AnalysisRecordBulkTrainingUpdateResponse)
+def bulk_update_training_eligibility(
+    payload: AnalysisRecordBulkTrainingUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    rows = db.scalars(
+        select(AnalysisRecord).where(AnalysisRecord.id.in_(payload.record_ids))
+    ).all()
+
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no matching records found")
+
+    for row in rows:
+        _set_training_eligibility(row, payload.usable_for_training)
+        db.add(row)
+
+    db.commit()
+
+    return AnalysisRecordBulkTrainingUpdateResponse(
+        updated_count=len(rows),
+        usable_for_training=payload.usable_for_training,
+    )
+
+
 @router.patch("/{record_id}/training-eligibility", response_model=AnalysisRecordTrainingUpdateResponse)
 def update_training_eligibility(
     record_id: int,
@@ -112,12 +147,7 @@ def update_training_eligibility(
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="record not found")
 
-    record.usable_for_training = payload.usable_for_training
-    metadata = dict(record.payload.get("metadata") or {})
-    metadata["usable_for_training"] = payload.usable_for_training
-    payload_json = dict(record.payload)
-    payload_json["metadata"] = metadata
-    record.payload = payload_json
+    _set_training_eligibility(record, payload.usable_for_training)
 
     db.add(record)
     db.commit()

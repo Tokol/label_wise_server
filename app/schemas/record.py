@@ -33,3 +33,13 @@ class AnalysisRecordTrainingUpdateRequest(BaseModel):
 class AnalysisRecordTrainingUpdateResponse(BaseModel):
     id: int
     usable_for_training: bool
+
+
+class AnalysisRecordBulkTrainingUpdateRequest(BaseModel):
+    record_ids: list[int] = Field(min_length=1)
+    usable_for_training: bool
+
+
+class AnalysisRecordBulkTrainingUpdateResponse(BaseModel):
+    updated_count: int
+    usable_for_training: bool
