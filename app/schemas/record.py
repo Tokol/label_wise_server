@@ -1,0 +1,26 @@
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class AnalysisRecordCreateRequest(BaseModel):
+    payload: dict[str, Any]
+
+
+class AnalysisRecordCreateResponse(BaseModel):
+    id: int
+    installation_id: str
+    created_at: datetime
+
+
+class AnalysisRecordSummary(BaseModel):
+    id: int
+    installation_id: str
+    schema_version: int | None
+    route_type: str | None
+    platform: str | None
+    overall_status: str | None
+    usable_for_training: bool
+    created_at: datetime
+    payload: dict[str, Any] | None = Field(default=None)
