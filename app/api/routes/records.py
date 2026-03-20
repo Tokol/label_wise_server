@@ -11,6 +11,8 @@ from app.schemas.record import (
     AnalysisRecordCreateRequest,
     AnalysisRecordCreateResponse,
     AnalysisRecordSummary,
+    AnalysisRecordTrainingUpdateRequest,
+    AnalysisRecordTrainingUpdateResponse,
 )
 from app.services.security import verify_token
 
@@ -98,3 +100,30 @@ def list_records(include_payload: bool = False, db: Session = Depends(get_db)):
         )
         for row in rows
     ]
+
+
+@router.patch("/{record_id}/training-eligibility", response_model=AnalysisRecordTrainingUpdateResponse)
+def update_training_eligibility(
+    record_id: int,
+    payload: AnalysisRecordTrainingUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    record = db.get(AnalysisRecord, record_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="record not found")
+
+    record.usable_for_training = payload.usable_for_training
+    metadata = dict(record.payload.get("metadata") or {})
+    metadata["usable_for_training"] = payload.usable_for_training
+    payload_json = dict(record.payload)
+    payload_json["metadata"] = metadata
+    record.payload = payload_json
+
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+
+    return AnalysisRecordTrainingUpdateResponse(
+        id=record.id,
+        usable_for_training=record.usable_for_training,
+    )

@@ -24,3 +24,12 @@ class AnalysisRecordSummary(BaseModel):
     usable_for_training: bool
     created_at: datetime
     payload: dict[str, Any] | None = Field(default=None)
+
+
+class AnalysisRecordTrainingUpdateRequest(BaseModel):
+    usable_for_training: bool
+
+
+class AnalysisRecordTrainingUpdateResponse(BaseModel):
+    id: int
+    usable_for_training: bool
