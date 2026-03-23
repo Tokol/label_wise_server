@@ -21,6 +21,8 @@ class DistillationJobSummary(BaseModel):
     train_record_count: int | None = None
     validation_record_count: int | None = None
     metrics_json: dict | None = None
+    logs_json: list[dict] | None = None
+    artifact_uri: str | None = None
     error_message: str | None = None
     progress_percent: int
     created_at: datetime

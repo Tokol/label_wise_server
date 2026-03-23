@@ -50,10 +50,28 @@ def _ensure_analysis_record_lifecycle_columns() -> None:
         )
 
 
+def _ensure_distillation_job_columns() -> None:
+    inspector = inspect(engine)
+    if "distillation_jobs" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("distillation_jobs")}
+    statements = []
+    if "logs_json" not in existing_columns:
+        statements.append("ALTER TABLE distillation_jobs ADD COLUMN logs_json JSON")
+    if "artifact_uri" not in existing_columns:
+        statements.append("ALTER TABLE distillation_jobs ADD COLUMN artifact_uri VARCHAR(300)")
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
     _ensure_analysis_record_lifecycle_columns()
+    _ensure_distillation_job_columns()
     yield
 
 

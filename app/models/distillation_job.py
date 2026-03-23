@@ -19,6 +19,8 @@ class DistillationJob(Base):
     train_record_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     validation_record_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     metrics_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    logs_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    artifact_uri: Mapped[str | None] = mapped_column(String(300), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(400), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
