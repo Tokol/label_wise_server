@@ -16,6 +16,67 @@ from app.schemas.distillation_job import (
 router = APIRouter(prefix="/distillation-jobs", tags=["distillation-jobs"])
 
 
+def _progress_percent_for_status(status: str) -> int:
+    if status == "queued":
+        return 5
+    if status == "preparing_dataset":
+        return 20
+    if status == "training":
+        return 58
+    if status == "evaluating":
+        return 86
+    if status == "completed":
+        return 100
+    if status == "failed":
+        return 100
+    return 0
+
+
+def _reconcile_job(job: DistillationJob) -> bool:
+    if job.status in {"completed", "failed"}:
+        return False
+
+    now = datetime.utcnow()
+    elapsed = (now - job.created_at).total_seconds()
+    changed = False
+
+    if job.started_at is None:
+        job.started_at = job.created_at
+        changed = True
+
+    if elapsed >= 18:
+        if job.status != "completed":
+            job.status = "completed"
+            job.progress_stage = "Completed simulated evaluation"
+            job.finished_at = now
+            job.metrics_json = {
+                **(job.metrics_json or {}),
+                "simulation": True,
+                "evaluation": {
+                    "status_accuracy": 0.87,
+                    "macro_f1": 0.84,
+                },
+            }
+            changed = True
+    elif elapsed >= 12:
+        if job.status != "evaluating":
+            job.status = "evaluating"
+            job.progress_stage = "Running validation and scoring"
+            changed = True
+    elif elapsed >= 6:
+        if job.status != "training":
+            job.status = "training"
+            job.progress_stage = "Fine-tuning the hosted 3B student"
+            changed = True
+    elif elapsed >= 2:
+        if job.status != "preparing_dataset":
+            job.status = "preparing_dataset"
+            job.progress_stage = "Preparing distillation dataset"
+            changed = True
+
+    return changed
+
+
 def _summary(job: DistillationJob) -> DistillationJobSummary:
     return DistillationJobSummary(
         id=job.id,
@@ -29,6 +90,7 @@ def _summary(job: DistillationJob) -> DistillationJobSummary:
         validation_record_count=job.validation_record_count,
         metrics_json=job.metrics_json,
         error_message=job.error_message,
+        progress_percent=_progress_percent_for_status(job.status),
         created_at=job.created_at,
         started_at=job.started_at,
         finished_at=job.finished_at,
@@ -48,6 +110,13 @@ def list_distillation_jobs(
 
     total_count = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = db.scalars(stmt.order_by(DistillationJob.created_at.desc()).offset(skip).limit(limit)).all()
+    changed = False
+    for row in rows:
+        if _reconcile_job(row):
+            db.add(row)
+            changed = True
+    if changed:
+        db.commit()
 
     return DistillationJobListResponse(
         jobs=[_summary(row) for row in rows],

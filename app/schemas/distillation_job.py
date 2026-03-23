@@ -22,6 +22,7 @@ class DistillationJobSummary(BaseModel):
     validation_record_count: int | None = None
     metrics_json: dict | None = None
     error_message: str | None = None
+    progress_percent: int
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
