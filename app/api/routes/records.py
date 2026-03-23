@@ -1,8 +1,8 @@
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -251,13 +251,62 @@ def create_record(
 
 
 @router.get("", response_model=AnalysisRecordsPaginatedResponse)
-def list_records(skip: int = 0, limit: int = 25, include_payload: bool = False, db: Session = Depends(get_db)):
-    # Get total count
-    total_count = db.query(AnalysisRecord).count()
-    
-    # Get paginated rows
+def list_records(
+    skip: int = 0,
+    limit: int = 25,
+    include_payload: bool = False,
+    query: str | None = Query(default=None),
+    route_type: str | None = Query(default=None),
+    overall_status: str | None = Query(default=None),
+    usable_for_training: bool | None = Query(default=None),
+    distillation_status: str | None = Query(default=None),
+    platform: str | None = Query(default=None),
+    category: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    stmt = select(AnalysisRecord)
+
+    if route_type:
+        stmt = stmt.where(AnalysisRecord.route_type == route_type)
+    if overall_status:
+        if overall_status == "unsafe":
+            stmt = stmt.where(AnalysisRecord.overall_status.in_(["unsafe", "violation"]))
+        elif overall_status == "cannot_assess":
+            stmt = stmt.where(AnalysisRecord.overall_status.in_(["cannot_assess", "cannot assess"]))
+        elif overall_status == "unknown":
+            stmt = stmt.where(
+                or_(
+                    AnalysisRecord.overall_status.is_(None),
+                    ~AnalysisRecord.overall_status.in_(["safe", "warning", "unsafe", "violation", "cannot_assess", "cannot assess"]),
+                )
+            )
+        else:
+            stmt = stmt.where(AnalysisRecord.overall_status == overall_status)
+    if usable_for_training is not None:
+        stmt = stmt.where(AnalysisRecord.usable_for_training == usable_for_training)
+    if distillation_status:
+        stmt = stmt.where(AnalysisRecord.distillation_status == distillation_status)
+    if platform:
+        stmt = stmt.where(AnalysisRecord.platform == platform)
+    if category:
+        stmt = stmt.where(cast(AnalysisRecord.payload, String).ilike(f'%{category}%'))
+    if query:
+        term = f"%{query.strip()}%"
+        stmt = stmt.where(
+            or_(
+                cast(AnalysisRecord.id, String).ilike(term),
+                AnalysisRecord.installation_id.ilike(term),
+                func.coalesce(AnalysisRecord.route_type, "").ilike(term),
+                func.coalesce(AnalysisRecord.platform, "").ilike(term),
+                func.coalesce(AnalysisRecord.overall_status, "").ilike(term),
+                cast(AnalysisRecord.payload, String).ilike(term),
+            )
+        )
+
+    total_count = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+
     rows = db.scalars(
-        select(AnalysisRecord).order_by(AnalysisRecord.created_at.desc()).offset(skip).limit(limit)
+        stmt.order_by(AnalysisRecord.created_at.desc()).offset(skip).limit(limit)
     ).all()
     
     records = [_summary_from_row(row, include_payload) for row in rows]

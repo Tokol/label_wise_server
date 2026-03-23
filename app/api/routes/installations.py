@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -42,13 +42,27 @@ def register_installation(payload: InstallationRegisterRequest, db: Session = De
 
 
 @router.get("", response_model=InstallationsPaginatedResponse)
-def list_installations(skip: int = 0, limit: int = 20, db: Session = Depends(get_db)):
-    # Get total count
-    total_count = db.query(Installation).count()
-    
-    # Get paginated rows
+def list_installations(
+    skip: int = 0,
+    limit: int = 20,
+    query: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    stmt = select(Installation)
+    if query:
+        term = f"%{query.strip().lower()}%"
+        stmt = stmt.where(
+            or_(
+                func.lower(Installation.installation_id).like(term),
+                func.lower(func.coalesce(Installation.platform, "")).like(term),
+                func.lower(func.coalesce(Installation.app_version, "")).like(term),
+            )
+        )
+
+    total_count = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+
     rows = db.scalars(
-        select(Installation).order_by(Installation.created_at.desc()).offset(skip).limit(limit)
+        stmt.order_by(Installation.created_at.desc()).offset(skip).limit(limit)
     ).all()
     
     installations = [
