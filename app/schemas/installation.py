@@ -21,3 +21,11 @@ class InstallationSummary(BaseModel):
     app_version: str | None
     created_at: datetime
     last_seen_at: datetime
+
+
+class InstallationsPaginatedResponse(BaseModel):
+    installations: list[InstallationSummary]
+    total_count: int
+    skip: int
+    limit: int
+    has_more: bool

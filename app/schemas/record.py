@@ -43,3 +43,11 @@ class AnalysisRecordBulkTrainingUpdateRequest(BaseModel):
 class AnalysisRecordBulkTrainingUpdateResponse(BaseModel):
     updated_count: int
     usable_for_training: bool
+
+
+class AnalysisRecordsPaginatedResponse(BaseModel):
+    records: list[AnalysisRecordSummary]
+    total_count: int
+    skip: int
+    limit: int
+    has_more: bool

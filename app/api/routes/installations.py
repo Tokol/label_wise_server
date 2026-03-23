@@ -7,6 +7,7 @@ from app.models.installation import Installation
 from app.schemas.installation import (
     InstallationRegisterRequest,
     InstallationRegisterResponse,
+    InstallationsPaginatedResponse,
     InstallationSummary,
 )
 from app.services.security import generate_client_token, hash_token
@@ -40,10 +41,17 @@ def register_installation(payload: InstallationRegisterRequest, db: Session = De
     )
 
 
-@router.get("", response_model=list[InstallationSummary])
-def list_installations(db: Session = Depends(get_db)):
-    rows = db.scalars(select(Installation).order_by(Installation.created_at.desc())).all()
-    return [
+@router.get("", response_model=InstallationsPaginatedResponse)
+def list_installations(skip: int = 0, limit: int = 20, db: Session = Depends(get_db)):
+    # Get total count
+    total_count = db.query(Installation).count()
+    
+    # Get paginated rows
+    rows = db.scalars(
+        select(Installation).order_by(Installation.created_at.desc()).offset(skip).limit(limit)
+    ).all()
+    
+    installations = [
         InstallationSummary(
             installation_id=row.installation_id,
             platform=row.platform,
@@ -53,3 +61,11 @@ def list_installations(db: Session = Depends(get_db)):
         )
         for row in rows
     ]
+    
+    return InstallationsPaginatedResponse(
+        installations=installations,
+        total_count=total_count,
+        skip=skip,
+        limit=limit,
+        has_more=(skip + limit) < total_count,
+    )

@@ -12,6 +12,7 @@ from app.schemas.record import (
     AnalysisRecordBulkTrainingUpdateResponse,
     AnalysisRecordCreateRequest,
     AnalysisRecordCreateResponse,
+    AnalysisRecordsPaginatedResponse,
     AnalysisRecordSummary,
     AnalysisRecordTrainingUpdateRequest,
     AnalysisRecordTrainingUpdateResponse,
@@ -94,10 +95,17 @@ def create_record(
     )
 
 
-@router.get("", response_model=list[AnalysisRecordSummary])
-def list_records(include_payload: bool = False, db: Session = Depends(get_db)):
-    rows = db.scalars(select(AnalysisRecord).order_by(AnalysisRecord.created_at.desc())).all()
-    return [
+@router.get("", response_model=AnalysisRecordsPaginatedResponse)
+def list_records(skip: int = 0, limit: int = 25, include_payload: bool = False, db: Session = Depends(get_db)):
+    # Get total count
+    total_count = db.query(AnalysisRecord).count()
+    
+    # Get paginated rows
+    rows = db.scalars(
+        select(AnalysisRecord).order_by(AnalysisRecord.created_at.desc()).offset(skip).limit(limit)
+    ).all()
+    
+    records = [
         AnalysisRecordSummary(
             id=row.id,
             installation_id=row.installation_id,
@@ -111,6 +119,14 @@ def list_records(include_payload: bool = False, db: Session = Depends(get_db)):
         )
         for row in rows
     ]
+    
+    return AnalysisRecordsPaginatedResponse(
+        records=records,
+        total_count=total_count,
+        skip=skip,
+        limit=limit,
+        has_more=(skip + limit) < total_count,
+    )
 
 
 @router.patch("/training-eligibility/bulk", response_model=AnalysisRecordBulkTrainingUpdateResponse)
