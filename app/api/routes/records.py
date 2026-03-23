@@ -72,10 +72,16 @@ def _require_installation(
 
 def _set_training_eligibility(record: AnalysisRecord, usable_for_training: bool) -> None:
     record.usable_for_training = usable_for_training
+    record.distillation_status = "approved_for_distillation" if usable_for_training else "excluded"
+    record.reviewed_at = datetime.utcnow()
+    if not usable_for_training:
+        record.excluded_reason = record.excluded_reason or "Excluded from dashboard curation"
+    else:
+        record.excluded_reason = None
     metadata = dict(record.payload.get("metadata") or {})
     metadata["usable_for_training"] = usable_for_training
-    metadata["distillation_status"] = "approved_for_distillation" if usable_for_training else "excluded"
-    metadata["reviewed_at"] = datetime.utcnow().isoformat()
+    metadata["distillation_status"] = record.distillation_status
+    metadata["reviewed_at"] = record.reviewed_at.isoformat()
     if not usable_for_training:
         metadata.setdefault("excluded_reason", "Excluded from dashboard curation")
     else:
@@ -90,14 +96,19 @@ def _record_metadata(record: AnalysisRecord) -> dict:
 
 
 def _record_distillation_status(record: AnalysisRecord) -> str:
+    if record.distillation_status in VALID_DISTILLATION_STATUSES:
+        return record.distillation_status
     metadata = _record_metadata(record)
     stored = metadata.get("distillation_status")
     if isinstance(stored, str) and stored in VALID_DISTILLATION_STATUSES:
         return stored
-    return "approved_for_distillation" if record.usable_for_training else "excluded"
+    return "pending_review" if record.usable_for_training else "excluded"
 
 
 def _record_datetime_field(record: AnalysisRecord, key: str) -> datetime | None:
+    direct_value = getattr(record, key, None)
+    if isinstance(direct_value, datetime):
+        return direct_value
     metadata = _record_metadata(record)
     value = metadata.get(key)
     if not isinstance(value, str) or not value:
@@ -109,6 +120,9 @@ def _record_datetime_field(record: AnalysisRecord, key: str) -> datetime | None:
 
 
 def _record_string_field(record: AnalysisRecord, key: str) -> str | None:
+    direct_value = getattr(record, key, None)
+    if isinstance(direct_value, str) and direct_value:
+        return direct_value
     metadata = _record_metadata(record)
     value = metadata.get(key)
     return value if isinstance(value, str) and value else None
@@ -128,7 +142,9 @@ def _sync_distillation_metadata(
         )
 
     metadata = _record_metadata(record)
-    now_iso = datetime.utcnow().isoformat()
+    now = datetime.utcnow()
+    now_iso = now.isoformat()
+    record.distillation_status = distillation_status
     metadata["distillation_status"] = distillation_status
 
     if distillation_status in {"approved_for_distillation", "exported", "used_in_training", "archived"}:
@@ -139,25 +155,37 @@ def _sync_distillation_metadata(
         metadata["usable_for_training"] = False
 
     if distillation_status in {"approved_for_distillation", "excluded"}:
+        record.reviewed_at = now
         metadata["reviewed_at"] = now_iso
     if distillation_status == "exported":
+        record.reviewed_at = record.reviewed_at or now
+        record.exported_at = now
+        record.distillation_batch_id = distillation_batch_id or record.distillation_batch_id
         metadata["reviewed_at"] = metadata.get("reviewed_at") or now_iso
         metadata["exported_at"] = now_iso
         metadata["distillation_batch_id"] = distillation_batch_id or metadata.get("distillation_batch_id")
     elif distillation_status == "used_in_training":
+        record.reviewed_at = record.reviewed_at or now
+        record.exported_at = record.exported_at or now
+        record.used_in_training_at = now
+        record.distillation_batch_id = distillation_batch_id or record.distillation_batch_id
         metadata["reviewed_at"] = metadata.get("reviewed_at") or now_iso
         metadata["exported_at"] = metadata.get("exported_at") or now_iso
         metadata["used_in_training_at"] = now_iso
         metadata["distillation_batch_id"] = distillation_batch_id or metadata.get("distillation_batch_id")
     elif distillation_status == "archived":
+        record.distillation_batch_id = distillation_batch_id or record.distillation_batch_id
         metadata["distillation_batch_id"] = distillation_batch_id or metadata.get("distillation_batch_id")
 
     if excluded_reason:
+        record.excluded_reason = excluded_reason
         metadata["excluded_reason"] = excluded_reason
     elif distillation_status != "excluded":
+        record.excluded_reason = None
         metadata.pop("excluded_reason", None)
 
     if distillation_batch_id and distillation_status in {"exported", "used_in_training", "archived"}:
+        record.distillation_batch_id = distillation_batch_id
         metadata["distillation_batch_id"] = distillation_batch_id
 
     payload_json = dict(record.payload)
@@ -198,9 +226,8 @@ def create_record(
     client = raw_payload.get("client") or {}
     teacher = raw_payload.get("teacher_result") or {}
     metadata = raw_payload.get("metadata") or {}
-    metadata["distillation_status"] = metadata.get("distillation_status") or (
-        "approved_for_distillation" if bool(metadata.get("usable_for_training", True)) else "excluded"
-    )
+    initial_distillation_status = metadata.get("distillation_status") or "pending_review"
+    metadata["distillation_status"] = initial_distillation_status
     raw_payload["metadata"] = metadata
 
     record = AnalysisRecord(
@@ -210,6 +237,7 @@ def create_record(
         platform=client.get("platform"),
         overall_status=teacher.get("overall_status"),
         usable_for_training=bool(metadata.get("usable_for_training", True)),
+        distillation_status=initial_distillation_status,
         payload=raw_payload,
     )
     db.add(record)
