@@ -9,6 +9,8 @@ from app.db.session import get_db
 from app.models.analysis_record import AnalysisRecord
 from app.models.installation import Installation
 from app.schemas.record import (
+    DistillationBatchListResponse,
+    DistillationBatchSummary,
     AnalysisRecordBulkTrainingUpdateRequest,
     AnalysisRecordBulkTrainingUpdateResponse,
     AnalysisRecordBulkDistillationUpdateRequest,
@@ -213,6 +215,17 @@ def _summary_from_row(row: AnalysisRecord, include_payload: bool) -> AnalysisRec
     )
 
 
+def _normalized_status_value(status_value: str | None) -> str:
+    normalized = (status_value or "unknown").lower()
+    if normalized in {"safe", "warning"}:
+        return normalized
+    if normalized in {"unsafe", "violation"}:
+        return "unsafe"
+    if normalized in {"cannot_assess", "cannot assess"}:
+        return "cannot_assess"
+    return "unknown"
+
+
 @router.post("", response_model=AnalysisRecordCreateResponse, status_code=status.HTTP_201_CREATED)
 def create_record(
     payload: AnalysisRecordCreateRequest,
@@ -247,6 +260,83 @@ def create_record(
         id=record.id,
         installation_id=record.installation_id,
         created_at=record.created_at,
+    )
+
+
+@router.get("/export-batches", response_model=DistillationBatchListResponse)
+def list_export_batches(
+    db: Session = Depends(get_db),
+):
+    rows = db.scalars(
+        select(AnalysisRecord)
+        .where(AnalysisRecord.distillation_batch_id.is_not(None))
+        .order_by(AnalysisRecord.exported_at.desc(), AnalysisRecord.created_at.desc())
+    ).all()
+
+    batches: dict[str, dict] = {}
+    for row in rows:
+        batch_id = _record_string_field(row, "distillation_batch_id")
+        if not batch_id:
+            continue
+
+        batch = batches.setdefault(
+            batch_id,
+            {
+                "batch_id": batch_id,
+                "exported_count": 0,
+                "safe_count": 0,
+                "warning_count": 0,
+                "unsafe_count": 0,
+                "cannot_assess_count": 0,
+                "unknown_count": 0,
+                "exported_at": _record_datetime_field(row, "exported_at"),
+                "last_used_in_training_at": _record_datetime_field(row, "used_in_training_at"),
+                "latest_record_at": row.created_at,
+            },
+        )
+
+        batch["exported_count"] += 1
+        status_key = _normalized_status_value(row.overall_status)
+        batch[f"{status_key}_count"] += 1
+        exported_at = _record_datetime_field(row, "exported_at")
+        if exported_at and (batch["exported_at"] is None or exported_at > batch["exported_at"]):
+            batch["exported_at"] = exported_at
+        used_in_training_at = _record_datetime_field(row, "used_in_training_at")
+        if used_in_training_at and (
+            batch["last_used_in_training_at"] is None or used_in_training_at > batch["last_used_in_training_at"]
+        ):
+            batch["last_used_in_training_at"] = used_in_training_at
+        if row.created_at and row.created_at > batch["latest_record_at"]:
+            batch["latest_record_at"] = row.created_at
+
+    summaries = []
+    for batch in batches.values():
+        has_training_usage = batch["last_used_in_training_at"] is not None
+        summaries.append(
+            DistillationBatchSummary(
+                batch_id=batch["batch_id"],
+                exported_count=batch["exported_count"],
+                safe_count=batch["safe_count"],
+                warning_count=batch["warning_count"],
+                unsafe_count=batch["unsafe_count"],
+                cannot_assess_count=batch["cannot_assess_count"],
+                unknown_count=batch["unknown_count"],
+                exported_at=batch["exported_at"],
+                last_used_in_training_at=batch["last_used_in_training_at"],
+                latest_record_at=batch["latest_record_at"],
+                status="used_in_training" if has_training_usage else "ready_for_training",
+                ready_for_training=not has_training_usage,
+            )
+        )
+
+    summaries.sort(
+        key=lambda batch: batch.exported_at or batch.latest_record_at or datetime.min,
+        reverse=True,
+    )
+
+    return DistillationBatchListResponse(
+        batches=summaries,
+        total_count=len(summaries),
     )
 
 

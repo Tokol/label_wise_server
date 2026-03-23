@@ -105,6 +105,26 @@ class AnalysisRecordExportResponse(BaseModel):
     records: list[DistillationExportRecord]
 
 
+class DistillationBatchSummary(BaseModel):
+    batch_id: str
+    exported_count: int
+    safe_count: int
+    warning_count: int
+    unsafe_count: int
+    cannot_assess_count: int
+    unknown_count: int
+    exported_at: datetime | None = None
+    last_used_in_training_at: datetime | None = None
+    latest_record_at: datetime | None = None
+    status: str
+    ready_for_training: bool
+
+
+class DistillationBatchListResponse(BaseModel):
+    batches: list[DistillationBatchSummary]
+    total_count: int
+
+
 class AnalysisRecordsPaginatedResponse(BaseModel):
     records: list[AnalysisRecordSummary]
     total_count: int
