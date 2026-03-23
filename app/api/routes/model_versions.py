@@ -1,10 +1,16 @@
-from fastapi import APIRouter, Depends, Query
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.model_version import ModelVersion
-from app.schemas.model_version import ModelVersionListResponse, ModelVersionSummary
+from app.schemas.model_version import (
+    ModelVersionListResponse,
+    ModelVersionStatusUpdateRequest,
+    ModelVersionSummary,
+)
 
 router = APIRouter(prefix="/model-versions", tags=["model-versions"])
 
@@ -47,3 +53,43 @@ def list_model_versions(
         limit=limit,
         has_more=(skip + limit) < total_count,
     )
+
+
+@router.patch("/{version_id}/status", response_model=ModelVersionSummary)
+def update_model_version_status(
+    version_id: int,
+    payload: ModelVersionStatusUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    version = db.get(ModelVersion, version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="model version not found")
+
+    previous_status = version.status
+    if payload.status == "active_test":
+        active_versions = db.scalars(select(ModelVersion).where(ModelVersion.status == "active_test")).all()
+        for active in active_versions:
+            if active.id == version.id:
+                continue
+            active.status = "ready_for_test"
+            active.activated_at = None
+            db.add(active)
+        version.status = "active_test"
+        version.activated_at = datetime.utcnow()
+        version.archived_at = None
+    elif payload.status == "archived":
+        version.status = "archived"
+        version.archived_at = datetime.utcnow()
+        if previous_status == "active_test":
+            version.activated_at = None
+    elif payload.status == "ready_for_test":
+        version.status = "ready_for_test"
+        version.activated_at = None
+        version.archived_at = None
+    else:
+        raise HTTPException(status_code=422, detail="invalid model version status")
+
+    db.add(version)
+    db.commit()
+    db.refresh(version)
+    return _summary(version)

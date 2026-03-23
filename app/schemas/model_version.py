@@ -18,6 +18,10 @@ class ModelVersionSummary(BaseModel):
     archived_at: datetime | None = None
 
 
+class ModelVersionStatusUpdateRequest(BaseModel):
+    status: str
+
+
 class ModelVersionListResponse(BaseModel):
     versions: list[ModelVersionSummary]
     total_count: int
