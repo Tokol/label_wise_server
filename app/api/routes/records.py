@@ -1,7 +1,8 @@
+import json
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -226,6 +227,36 @@ def _normalized_status_value(status_value: str | None) -> str:
     return "unknown"
 
 
+def _build_training_export_record(record: AnalysisRecord, batch_id: str) -> dict:
+    payload = record.payload or {}
+    input_block = payload.get("input") or {}
+    teacher_result = payload.get("teacher_result") or {}
+    preferences = payload.get("preferences")
+    if not isinstance(preferences, dict):
+        preferences = {}
+
+    return {
+        "record_id": record.id,
+        "batch_id": batch_id,
+        "schema_version": record.schema_version or payload.get("schema_version"),
+        "created_at": record.created_at.isoformat(),
+        "input": {
+            "product_name": input_block.get("product_name_original"),
+            "brand": input_block.get("brand_original"),
+            "category": input_block.get("category_english"),
+            "origin_country": input_block.get("origin_country_english"),
+            "barcode": input_block.get("barcode"),
+            "ingredients": input_block.get("ingredients_english") or [],
+            "additives": input_block.get("additives_english") or [],
+            "allergens": input_block.get("allergens_english") or [],
+        },
+        "preferences": preferences,
+        "label": {
+            "overall_status": _normalized_status_value(teacher_result.get("overall_status") or record.overall_status),
+        },
+    }
+
+
 @router.post("", response_model=AnalysisRecordCreateResponse, status_code=status.HTTP_201_CREATED)
 def create_record(
     payload: AnalysisRecordCreateRequest,
@@ -356,6 +387,28 @@ def list_export_batches(
         skip=skip,
         limit=limit,
         has_more=(skip + limit) < total_count,
+    )
+
+
+@router.get("/export-batches/{batch_id}/training-export")
+def download_training_export(
+    batch_id: str,
+    db: Session = Depends(get_db),
+):
+    rows = db.scalars(
+        select(AnalysisRecord)
+        .where(AnalysisRecord.distillation_batch_id == batch_id)
+        .order_by(AnalysisRecord.created_at.asc(), AnalysisRecord.id.asc())
+    ).all()
+
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="distillation batch not found")
+
+    jsonl = "\n".join(json.dumps(_build_training_export_record(row, batch_id), ensure_ascii=False) for row in rows)
+    return Response(
+        content=jsonl,
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": f'attachment; filename="{batch_id}.jsonl"'},
     )
 
 
