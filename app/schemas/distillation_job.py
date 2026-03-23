@@ -10,6 +10,30 @@ class DistillationJobCreateRequest(BaseModel):
     dataset_mode: str = Field(default="single_batch", max_length=64)
 
 
+class DistillationJobWorkerClaimRequest(BaseModel):
+    worker_id: str = Field(min_length=1, max_length=120)
+
+
+class DistillationJobWorkerProgressRequest(BaseModel):
+    status: str = Field(min_length=1, max_length=64)
+    progress_stage: str = Field(min_length=1, max_length=120)
+    log_message: str | None = Field(default=None, max_length=300)
+    artifact_uri: str | None = Field(default=None, max_length=300)
+    metrics_json: dict | None = None
+
+
+class DistillationJobWorkerCompleteRequest(BaseModel):
+    model_name: str | None = Field(default=None, max_length=120)
+    artifact_uri: str | None = Field(default=None, max_length=300)
+    metrics_json: dict | None = None
+    log_message: str | None = Field(default=None, max_length=300)
+
+
+class DistillationJobWorkerFailRequest(BaseModel):
+    error_message: str = Field(min_length=1, max_length=400)
+    log_message: str | None = Field(default=None, max_length=300)
+
+
 class DistillationJobSummary(BaseModel):
     id: int
     batch_id: str
