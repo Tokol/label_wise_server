@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     worker_poll_seconds: float = 5.0
     worker_base_url: str = "http://127.0.0.1:8000"
     worker_id: str = "label-wise-worker"
+    worker_artifacts_dir: str = str(Path(__file__).resolve().parents[2] / "artifacts")
+    trainer_python_bin: str = "python3"
+    trainer_module: str = "app.services.training_runner"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

@@ -1,8 +1,10 @@
 import json
-import random
+import os
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib import error, parse, request
 
@@ -110,52 +112,50 @@ class DistillationWorkerClient:
 
         return [json.loads(line) for line in raw.splitlines() if line.strip()]
 
-
-def _normalized_label(example: dict[str, Any]) -> str:
-    label = (((example.get("label") or {}).get("overall_status")) or "unknown").lower()
-    if label in {"safe", "warning", "unsafe", "cannot_assess"}:
-        return label
-    return "unknown"
+def _write_jsonl(path: Path, dataset: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(json.dumps(item, ensure_ascii=False) for item in dataset), encoding="utf-8")
 
 
-def _simulate_metrics(dataset: list[dict[str, Any]], train_count: int | None, validation_count: int | None) -> dict[str, Any]:
-    label_distribution = {"safe": 0, "warning": 0, "unsafe": 0, "cannot_assess": 0, "unknown": 0}
-    complete_inputs = 0
-    preference_keys: set[str] = set()
-    for example in dataset:
-        label_distribution[_normalized_label(example)] += 1
-        input_block = example.get("input") or {}
-        if input_block.get("product_name") and input_block.get("category"):
-            complete_inputs += 1
-        preference_keys.update((example.get("preferences") or {}).keys())
+def _run_trainer(
+    *,
+    dataset_path: Path,
+    output_dir: Path,
+    model_name: str,
+    base_model: str,
+    task_type: str,
+    train_count: int | None,
+    validation_count: int | None,
+) -> dict[str, Any]:
+    command = [
+        settings.trainer_python_bin,
+        "-m",
+        settings.trainer_module,
+        "--input-jsonl",
+        str(dataset_path),
+        "--output-dir",
+        str(output_dir),
+        "--model-name",
+        model_name,
+        "--base-model",
+        base_model,
+        "--task-type",
+        task_type,
+        "--backend",
+        os.getenv("LABEL_WISE_TRAINER_BACKEND", "artifact_only"),
+    ]
+    if train_count is not None:
+        command.extend(["--train-count", str(train_count)])
+    if validation_count is not None:
+        command.extend(["--validation-count", str(validation_count)])
 
-    dataset_size = max(1, len(dataset))
-    quality_ratio = complete_inputs / dataset_size
-    dominant_share = max(label_distribution.values()) / dataset_size
-    quality_bonus = min(0.12, quality_ratio * 0.12)
-    balance_penalty = min(0.08, max(0.0, dominant_share - 0.55))
-    size_bonus = min(dataset_size, 200) / 2000
-
-    random.seed(dataset_size + len(preference_keys))
-    jitter = random.uniform(-0.01, 0.01)
-    status_accuracy = round(max(0.61, min(0.96, 0.72 + quality_bonus - balance_penalty + size_bonus + jitter)), 3)
-    macro_f1 = round(max(0.54, min(status_accuracy - 0.04, 0.93)), 3)
-
-    return {
-        "execution_mode": "external_worker",
-        "dataset_summary": {
-            "record_count": dataset_size,
-            "train": train_count,
-            "validation": validation_count,
-            "complete_input_ratio": round(quality_ratio, 3),
-            "preference_keys": sorted(preference_keys),
-            "label_distribution": label_distribution,
-        },
-        "evaluation": {
-            "status_accuracy": status_accuracy,
-            "macro_f1": macro_f1,
-        },
-    }
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        raise RuntimeError(completed.stderr.strip() or completed.stdout.strip() or "trainer process failed")
+    try:
+        return json.loads(completed.stdout.strip())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"trainer returned invalid JSON: {completed.stdout}") from exc
 
 
 def _run_job(client: DistillationWorkerClient, job: dict[str, Any]) -> None:
@@ -164,47 +164,54 @@ def _run_job(client: DistillationWorkerClient, job: dict[str, Any]) -> None:
     train_count = job.get("train_record_count")
     validation_count = job.get("validation_record_count")
 
-    claimed = client.claim_job(job_id)
+    client.claim_job(job_id)
     print(f"[worker] claimed job #{job_id} for batch {batch_id}")
 
     dataset = client.download_training_export(batch_id)
-    artifact_uri = f"artifact://distillation_jobs/{job_id}/model_bundle"
+    artifacts_root = Path(settings.worker_artifacts_dir)
+    job_dir = artifacts_root / f"job_{job_id}"
+    dataset_path = job_dir / "training_export.jsonl"
+    _write_jsonl(dataset_path, dataset)
 
     client.update_progress(
         job_id,
         status="preparing_dataset",
-        progress_stage="Downloaded JSONL export and validated dataset",
-        log_message=f"Loaded {len(dataset)} JSONL records from export batch {batch_id}.",
+        progress_stage="Downloaded JSONL export and staged trainer input",
+        log_message=f"Loaded {len(dataset)} JSONL records from export batch {batch_id} into {dataset_path}.",
     )
     time.sleep(1.0)
 
     client.update_progress(
         job_id,
         status="training",
-        progress_stage="Running external fine-tuning worker",
-        log_message="Started external SLM training loop.",
-        artifact_uri=artifact_uri,
+        progress_stage="Running trainer module for fine-tuning",
+        log_message=f"Invoking {settings.trainer_module} through {settings.trainer_python_bin}.",
     )
-    time.sleep(2.0)
-
-    metrics = _simulate_metrics(dataset, train_count, validation_count)
+    training_result = _run_trainer(
+        dataset_path=dataset_path,
+        output_dir=job_dir / "model_artifact",
+        model_name=f"slm_job_{job_id}",
+        base_model=str(job["base_model"]),
+        task_type=str(job["task_type"]),
+        train_count=train_count,
+        validation_count=validation_count,
+    )
     client.update_progress(
         job_id,
         status="evaluating",
-        progress_stage="Scoring validation split and packaging model artifact",
-        log_message="Training complete. Running evaluation pass.",
-        artifact_uri=artifact_uri,
-        metrics_json=metrics,
+        progress_stage="Trainer finished and worker is registering evaluation output",
+        log_message="Trainer returned metrics and artifact bundle.",
+        artifact_uri=training_result["artifact_uri"],
+        metrics_json=training_result["metrics_json"],
     )
     time.sleep(1.0)
 
-    model_name = f"slm_job_{job_id}"
     completed = client.complete_job(
         job_id,
-        model_name=model_name,
-        artifact_uri=artifact_uri,
-        metrics_json=metrics,
-        log_message="External worker completed training, evaluation, and artifact registration.",
+        model_name=training_result["model_name"],
+        artifact_uri=training_result["artifact_uri"],
+        metrics_json=training_result["metrics_json"],
+        log_message="External worker completed trainer execution and artifact registration.",
     )
     print(f"[worker] completed job #{job_id} -> {completed.get('artifact_uri')}")
 
