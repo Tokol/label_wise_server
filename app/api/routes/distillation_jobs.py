@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.analysis_record import AnalysisRecord
 from app.models.distillation_job import DistillationJob
+from app.models.model_version import ModelVersion
 from app.schemas.distillation_job import (
     DistillationJobCreateRequest,
     DistillationJobListResponse,
@@ -97,6 +98,26 @@ def _summary(job: DistillationJob) -> DistillationJobSummary:
     )
 
 
+def _ensure_model_version_for_job(job: DistillationJob, db: Session) -> bool:
+    existing = db.scalar(select(ModelVersion).where(ModelVersion.job_id == job.id))
+    if existing is not None or job.status != "completed":
+        return False
+
+    version = ModelVersion(
+        job_id=job.id,
+        batch_id=job.batch_id,
+        model_name=f"slm_{job.id}",
+        base_model=job.base_model,
+        task_type=job.task_type,
+        status="ready_for_test",
+        metrics_json=job.metrics_json,
+        artifact_uri=f"simulated://model_versions/slm_{job.id}",
+        created_at=job.finished_at or datetime.utcnow(),
+    )
+    db.add(version)
+    return True
+
+
 @router.get("", response_model=DistillationJobListResponse)
 def list_distillation_jobs(
     skip: int = 0,
@@ -111,11 +132,14 @@ def list_distillation_jobs(
     total_count = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = db.scalars(stmt.order_by(DistillationJob.created_at.desc()).offset(skip).limit(limit)).all()
     changed = False
+    created_versions = False
     for row in rows:
         if _reconcile_job(row):
             db.add(row)
             changed = True
-    if changed:
+        if _ensure_model_version_for_job(row, db):
+            created_versions = True
+    if changed or created_versions:
         db.commit()
 
     return DistillationJobListResponse(

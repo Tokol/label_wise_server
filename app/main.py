@@ -8,7 +8,7 @@ from app.api.router import router as api_router
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
-from app.models import analysis_record, distillation_job, installation  # noqa: F401
+from app.models import analysis_record, distillation_job, installation, model_version  # noqa: F401
 
 
 def _ensure_analysis_record_lifecycle_columns() -> None:
