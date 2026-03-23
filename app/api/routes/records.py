@@ -265,6 +265,10 @@ def create_record(
 
 @router.get("/export-batches", response_model=DistillationBatchListResponse)
 def list_export_batches(
+    skip: int = 0,
+    limit: int = 12,
+    status: str | None = Query(default=None),
+    query: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     rows = db.scalars(
@@ -334,9 +338,24 @@ def list_export_batches(
         reverse=True,
     )
 
+    if status == "ready_for_training":
+        summaries = [batch for batch in summaries if batch.ready_for_training]
+    elif status == "used_in_training":
+        summaries = [batch for batch in summaries if not batch.ready_for_training]
+
+    if query:
+        term = query.strip().lower()
+        summaries = [batch for batch in summaries if term in batch.batch_id.lower()]
+
+    total_count = len(summaries)
+    paged = summaries[skip: skip + limit]
+
     return DistillationBatchListResponse(
-        batches=summaries,
-        total_count=len(summaries),
+        batches=paged,
+        total_count=total_count,
+        skip=skip,
+        limit=limit,
+        has_more=(skip + limit) < total_count,
     )
 
 

@@ -123,6 +123,9 @@ class DistillationBatchSummary(BaseModel):
 class DistillationBatchListResponse(BaseModel):
     batches: list[DistillationBatchSummary]
     total_count: int
+    skip: int
+    limit: int
+    has_more: bool
 
 
 class AnalysisRecordsPaginatedResponse(BaseModel):
