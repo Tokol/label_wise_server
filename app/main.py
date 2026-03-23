@@ -23,11 +23,11 @@ def _ensure_analysis_record_lifecycle_columns() -> None:
     if "distillation_batch_id" not in existing_columns:
         statements.append("ALTER TABLE analysis_records ADD COLUMN distillation_batch_id VARCHAR(120)")
     if "reviewed_at" not in existing_columns:
-        statements.append("ALTER TABLE analysis_records ADD COLUMN reviewed_at DATETIME")
+        statements.append("ALTER TABLE analysis_records ADD COLUMN reviewed_at TIMESTAMP")
     if "exported_at" not in existing_columns:
-        statements.append("ALTER TABLE analysis_records ADD COLUMN exported_at DATETIME")
+        statements.append("ALTER TABLE analysis_records ADD COLUMN exported_at TIMESTAMP")
     if "used_in_training_at" not in existing_columns:
-        statements.append("ALTER TABLE analysis_records ADD COLUMN used_in_training_at DATETIME")
+        statements.append("ALTER TABLE analysis_records ADD COLUMN used_in_training_at TIMESTAMP")
     if "excluded_reason" not in existing_columns:
         statements.append("ALTER TABLE analysis_records ADD COLUMN excluded_reason VARCHAR(200)")
 
