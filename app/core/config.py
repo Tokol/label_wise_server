@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     database_url: str = f"sqlite:///{Path(__file__).resolve().parents[2] / 'label_wise.db'}"
     api_prefix: str = "/api"
+    worker_poll_seconds: float = 5.0
+    worker_base_url: str = "http://127.0.0.1:8000"
+    worker_id: str = "label-wise-worker"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
