@@ -46,12 +46,13 @@ If you want to fine-tune before setting up a dedicated GPU service, use Colab as
 !pip install torch transformers peft numpy accelerate datasets sentencepiece
 ```
 
-### 4. Train one exported batch directly from your server
-This helper downloads the JSONL export and calls the same trainer module used by the external worker:
+### 4. Train one distillation job directly from your server
+This helper downloads the JSONL export, runs the same trainer module used by the external worker, and can report completion back to the job:
 
 ```bash
 !python scripts/colab_train_batch.py \
   --server-url https://label-wise-server.onrender.com \
+  --job-id <your_job_id> \
   --batch-id <your_batch_id> \
   --output-dir /content/label_wise_artifacts/<your_batch_id> \
   --base-model Qwen/Qwen2.5-3B-Instruct \
@@ -64,6 +65,7 @@ Store the produced artifact directory in Google Drive or upload it to Hugging Fa
 ### Notes
 - `artifact_only` backend keeps the flow testable without full training.
 - `hf_peft_seqcls` is the real LoRA-style training path and needs the extra ML dependencies above.
+- If `--job-id` is provided, the helper claims the job, reports progress, and completes or fails it through the server API.
 - The helper script writes `downloaded_batch.jsonl` and a `model_artifact/` directory containing:
   - `metrics.json`
   - `model_info.json`
