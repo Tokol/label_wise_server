@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import json
 import os
 import random
@@ -320,15 +321,21 @@ def _run_hf_peft_sequence_classification_training(
         report_to=[],
     )
 
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        tokenizer=tokenizer,
-        data_collator=DataCollatorWithPadding(tokenizer=tokenizer),
-        compute_metrics=compute_metrics if eval_dataset is not None else None,
-    )
+    trainer_kwargs = {
+        "model": model,
+        "args": training_args,
+        "train_dataset": train_dataset,
+        "eval_dataset": eval_dataset,
+        "data_collator": DataCollatorWithPadding(tokenizer=tokenizer),
+        "compute_metrics": compute_metrics if eval_dataset is not None else None,
+    }
+    trainer_signature = inspect.signature(Trainer.__init__)
+    if "processing_class" in trainer_signature.parameters:
+        trainer_kwargs["processing_class"] = tokenizer
+    elif "tokenizer" in trainer_signature.parameters:
+        trainer_kwargs["tokenizer"] = tokenizer
+
+    trainer = Trainer(**trainer_kwargs)
 
     trainer.train()
     metrics = trainer.evaluate(eval_dataset=eval_dataset) if eval_dataset is not None else {}
