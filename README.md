@@ -44,9 +44,18 @@ If you want to fine-tune before setting up a dedicated GPU service, use Colab as
 ```bash
 !pip install -r requirements.txt
 !pip install torch transformers peft numpy accelerate datasets sentencepiece
+!pip install huggingface_hub
 ```
 
-### 4. Train one distillation job directly from your server
+### 4. Log in to Hugging Face in Colab
+If you want the finished adapter to upload directly into your Hugging Face model repo:
+
+```bash
+from huggingface_hub import notebook_login
+notebook_login()
+```
+
+### 5. Train one distillation job directly from your server
 This helper downloads the JSONL export, runs the same trainer module used by the external worker, and can report completion back to the job:
 
 ```bash
@@ -56,16 +65,18 @@ This helper downloads the JSONL export, runs the same trainer module used by the
   --batch-id <your_batch_id> \
   --output-dir /content/label_wise_artifacts/<your_batch_id> \
   --base-model Qwen/Qwen2.5-3B-Instruct \
+  --hf-repo-id IndraDThor/label-wise-qwen25-3b-lora \
   --backend hf_peft_seqcls
 ```
 
-### 5. Save artifacts
-Store the produced artifact directory in Google Drive or upload it to Hugging Face Hub before the Colab session ends.
+### 6. Save artifacts
+If `--hf-repo-id` is provided and you logged in, the finished artifact is uploaded to Hugging Face automatically. Keep Google Drive or a zip download as backup if you want.
 
 ### Notes
 - `artifact_only` backend keeps the flow testable without full training.
 - `hf_peft_seqcls` is the real LoRA-style training path and needs the extra ML dependencies above.
 - If `--job-id` is provided, the helper claims the job, reports progress, and completes or fails it through the server API.
+- If `--hf-repo-id` is provided, the helper uploads the finished `model_artifact/` folder into that Hugging Face model repo and reports the Hugging Face URL back to the server.
 - The helper script writes `downloaded_batch.jsonl` and a `model_artifact/` directory containing:
   - `metrics.json`
   - `model_info.json`

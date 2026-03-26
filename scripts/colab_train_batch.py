@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from urllib import error, parse, request
@@ -44,6 +45,32 @@ def json_request(server_url: str, method: str, path: str, payload: dict | None =
     return json.loads(raw) if raw else {}
 
 
+def upload_artifact_to_hugging_face(
+    *,
+    artifact_dir: Path,
+    repo_id: str,
+    repo_subpath: str,
+    token: str | None,
+    commit_message: str,
+) -> str:
+    try:
+        from huggingface_hub import upload_folder
+    except ImportError as exc:
+        raise RuntimeError(
+            "huggingface_hub is required for --hf-repo-id uploads. Install it in Colab with `pip install huggingface_hub`."
+        ) from exc
+
+    upload_folder(
+        repo_id=repo_id,
+        folder_path=str(artifact_dir),
+        path_in_repo=repo_subpath,
+        repo_type="model",
+        token=token,
+        commit_message=commit_message,
+    )
+    return f"https://huggingface.co/{repo_id}/tree/main/{repo_subpath}"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Download a training batch from Label Wise Server and run training locally (Colab-friendly).")
     parser.add_argument("--server-url", required=True, help="Base URL of the label_wise_server deployment, e.g. https://label-wise-server.onrender.com")
@@ -55,6 +82,9 @@ def main() -> int:
     parser.add_argument("--task-type", default="overall_status_classification")
     parser.add_argument("--backend", default="artifact_only")
     parser.add_argument("--worker-id", default="colab-manual", help="Worker identifier to write into job logs when job_id is provided")
+    parser.add_argument("--hf-repo-id", default=None, help="Optional Hugging Face model repo id to upload the finished artifact into")
+    parser.add_argument("--hf-repo-subpath", default=None, help="Optional repo subpath. Defaults to versions/<model_name>")
+    parser.add_argument("--hf-token", default=None, help="Optional Hugging Face token. Falls back to HF_TOKEN env var")
     parser.add_argument("--train-count", type=int, default=None)
     parser.add_argument("--validation-count", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=2)
@@ -109,6 +139,17 @@ def main() -> int:
             lora_dropout=args.lora_dropout,
         )
 
+        artifact_uri = result.artifact_uri
+        if args.hf_repo_id:
+            repo_subpath = args.hf_repo_subpath or f"versions/{result.model_name}"
+            artifact_uri = upload_artifact_to_hugging_face(
+                artifact_dir=output_dir / "model_artifact",
+                repo_id=args.hf_repo_id,
+                repo_subpath=repo_subpath,
+                token=args.hf_token or os.getenv("HF_TOKEN"),
+                commit_message=f"Upload trained artifact for {result.model_name}",
+            )
+
         if args.job_id is not None:
             json_request(
                 args.server_url,
@@ -118,7 +159,7 @@ def main() -> int:
                     "status": "evaluating",
                     "progress_stage": "Colab finished training and is registering artifacts",
                     "log_message": "Trainer finished in Colab and returned metrics.",
-                    "artifact_uri": result.artifact_uri,
+                    "artifact_uri": artifact_uri,
                     "metrics_json": result.metrics_json,
                 },
             )
@@ -128,7 +169,7 @@ def main() -> int:
                 f"/distillation-jobs/{args.job_id}/complete",
                 {
                     "model_name": result.model_name,
-                    "artifact_uri": result.artifact_uri,
+                    "artifact_uri": artifact_uri,
                     "metrics_json": result.metrics_json,
                     "log_message": "Colab reported successful training completion.",
                 },
@@ -141,7 +182,7 @@ def main() -> int:
                     "batch_id": args.batch_id,
                     "downloaded_export": str(export_path),
                     "model_name": result.model_name,
-                    "artifact_uri": result.artifact_uri,
+                    "artifact_uri": artifact_uri,
                     "metrics_json": result.metrics_json,
                 }
             )
