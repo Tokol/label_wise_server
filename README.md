@@ -83,3 +83,87 @@ If `--hf-repo-id` is provided and you logged in, the finished artifact is upload
   - `training_export_snapshot.jsonl`
   - `training_config.json`
   - `artifact_manifest.txt`
+
+## Student Inference API
+`label_wise_lite` should call the server with structured JSON instead of sending a free-form prompt and extracting braces from model text.
+
+### Why this contract
+- The current student training path is `hf_peft_seqcls`, which is an overall-status classifier.
+- The server should own the response schema so Flutter does not depend on generated JSON text.
+- The future inference runtime will load:
+  - base model `Qwen/Qwen2.5-3B-Instruct`
+  - the active LoRA adapter artifact from Hugging Face
+
+### 1. Get active model metadata
+Use this to verify which model version is currently selected for inference.
+
+```bash
+curl https://label-wise-server.onrender.com/api/student-inference/active-model
+```
+
+Example response:
+```json
+{
+  "model_version_id": 3,
+  "model_name": "slm_job_6",
+  "base_model": "Qwen/Qwen2.5-3B-Instruct",
+  "artifact_uri": "https://huggingface.co/IndraDThor/label-wise-qwen25-3b-lora/tree/main/versions/slm_job_6",
+  "metrics_json": {
+    "execution_mode": "hf_peft_seqcls",
+    "dataset_summary": {
+      "record_count": 3,
+      "train": 2,
+      "validation": 1
+    },
+    "evaluation": {
+      "status_accuracy": 1.0,
+      "macro_f1": 0.2,
+      "eval_loss": 0.5352
+    }
+  }
+}
+```
+
+### 2. Predict with the active student model
+`label_wise_lite` should send a structured product payload.
+
+```bash
+curl -X POST https://label-wise-server.onrender.com/api/student-inference/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": {
+      "product_name": "Instant noodles",
+      "brand": "Example",
+      "category": "snacks",
+      "ingredients": ["wheat flour", "palm oil", "gelatin"]
+    },
+    "preferences": {
+      "religion": {"halal": true},
+      "ethical": {},
+      "medical": {},
+      "lifestyle": {}
+    }
+  }'
+```
+
+Example response:
+```json
+{
+  "model_version_id": 3,
+  "model_name": "slm_job_6",
+  "base_model": "Qwen/Qwen2.5-3B-Instruct",
+  "artifact_uri": "https://huggingface.co/IndraDThor/label-wise-qwen25-3b-lora/tree/main/versions/slm_job_6",
+  "overall_status": "unsafe",
+  "decision_line": "Potential conflict detected.",
+  "confidence": 0.88
+}
+```
+
+### Current state vs future runtime
+- Right now `/api/student-inference/predict` is still simulated server logic.
+- The public contract is already the right shape for `label_wise_lite`.
+- The future real runtime should keep the same request and response schema while replacing the simulated logic with:
+  - active model lookup
+  - base Qwen load
+  - active LoRA adapter load
+  - model inference

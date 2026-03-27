@@ -1,0 +1,87 @@
+{
+  "info": {
+    "name": "Label Wise Student Inference",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Smoke tests for the student inference contract used by label_wise_lite."
+  },
+  "item": [
+    {
+      "name": "Get Active Student Model",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/student-inference/active-model",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "student-inference",
+            "active-model"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Predict Safe Example",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"input\": {\n    \"product_name\": \"Olive oil\",\n    \"brand\": \"Primadonna\",\n    \"category\": \"fats\",\n    \"ingredients\": [\"olive oil\"]\n  },\n  \"preferences\": {\n    \"religion\": {},\n    \"ethical\": {},\n    \"medical\": {},\n    \"lifestyle\": {}\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/student-inference/predict",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "student-inference",
+            "predict"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Predict Unsafe Example",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"input\": {\n    \"product_name\": \"Candy\",\n    \"brand\": \"Example\",\n    \"category\": \"snacks\",\n    \"ingredients\": [\"sugar\", \"gelatin\", \"coloring\"]\n  },\n  \"preferences\": {\n    \"religion\": {\n      \"halal\": true\n    },\n    \"ethical\": {},\n    \"medical\": {},\n    \"lifestyle\": {}\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/student-inference/predict",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "student-inference",
+            "predict"
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://label-wise-server.onrender.com"
+    }
+  ]
+}
