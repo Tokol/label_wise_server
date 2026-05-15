@@ -1,4 +1,5 @@
 from datetime import datetime
+import math
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -22,6 +23,16 @@ router = APIRouter(prefix="/distillation-jobs", tags=["distillation-jobs"])
 
 ACTIVE_JOB_STATUSES = {"queued", "preparing_dataset", "training", "evaluating"}
 WORKER_PROGRESS_STATUSES = {"preparing_dataset", "training", "evaluating"}
+
+
+def _json_safe(value):
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 def _progress_percent_for_status(status: str) -> int:
@@ -51,8 +62,8 @@ def _summary(job: DistillationJob) -> DistillationJobSummary:
         progress_stage=job.progress_stage,
         train_record_count=job.train_record_count,
         validation_record_count=job.validation_record_count,
-        metrics_json=job.metrics_json,
-        logs_json=job.logs_json,
+        metrics_json=_json_safe(job.metrics_json),
+        logs_json=_json_safe(job.logs_json),
         artifact_uri=job.artifact_uri,
         error_message=job.error_message,
         progress_percent=_progress_percent_for_status(job.status),
@@ -248,7 +259,7 @@ def update_distillation_job_progress(
     if payload.artifact_uri:
         job.artifact_uri = payload.artifact_uri
     if payload.metrics_json is not None:
-        job.metrics_json = payload.metrics_json
+        job.metrics_json = _json_safe(payload.metrics_json)
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -278,7 +289,7 @@ def complete_distillation_job(
     elif not job.artifact_uri:
         job.artifact_uri = f"artifact://distillation_jobs/{job.id}/model_bundle"
     if payload.metrics_json is not None:
-        job.metrics_json = payload.metrics_json
+        job.metrics_json = _json_safe(payload.metrics_json)
     if payload.log_message:
         _append_log(job, payload.log_message)
     else:

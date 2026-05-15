@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -10,6 +11,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.services.training_runner import run_training
+
+
+def json_safe(value):
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [json_safe(item) for item in value]
+    return value
 
 
 def download_batch_export(server_url: str, batch_id: str, destination: Path) -> Path:
@@ -31,7 +42,7 @@ def json_request(server_url: str, method: str, path: str, payload: dict | None =
     body = None
     headers = {"Accept": "application/json"}
     if payload is not None:
-        body = json.dumps(payload).encode("utf-8")
+        body = json.dumps(json_safe(payload), allow_nan=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
 
     req = request.Request(f"{server_url.rstrip('/')}/api{path}", data=body, headers=headers, method=method)
@@ -150,6 +161,7 @@ def main() -> int:
                 commit_message=f"Upload trained artifact for {result.model_name}",
             )
 
+        safe_metrics_json = json_safe(result.metrics_json)
         if args.job_id is not None:
             json_request(
                 args.server_url,
@@ -160,7 +172,7 @@ def main() -> int:
                     "progress_stage": "Colab finished training and is registering artifacts",
                     "log_message": "Trainer finished in Colab and returned metrics.",
                     "artifact_uri": artifact_uri,
-                    "metrics_json": result.metrics_json,
+                    "metrics_json": safe_metrics_json,
                 },
             )
             json_request(
@@ -170,7 +182,7 @@ def main() -> int:
                 {
                     "model_name": result.model_name,
                     "artifact_uri": artifact_uri,
-                    "metrics_json": result.metrics_json,
+                    "metrics_json": safe_metrics_json,
                     "log_message": "Colab reported successful training completion.",
                 },
             )
@@ -183,7 +195,7 @@ def main() -> int:
                     "downloaded_export": str(export_path),
                     "model_name": result.model_name,
                     "artifact_uri": artifact_uri,
-                    "metrics_json": result.metrics_json,
+                    "metrics_json": json_safe(result.metrics_json),
                 }
             )
         )

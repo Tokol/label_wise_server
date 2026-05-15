@@ -1,6 +1,7 @@
 import argparse
 import inspect
 import json
+import math
 import os
 import random
 from dataclasses import asdict, dataclass
@@ -47,6 +48,16 @@ def _normalized_label(example: dict[str, Any]) -> str:
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _finite_metric(value: Any, default: float | None = 0.0) -> float | None:
+    try:
+        metric = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(metric):
+        return None
+    return round(metric, 4)
 
 
 def _join_items(items: list[str] | None) -> str:
@@ -343,9 +354,9 @@ def _run_hf_peft_sequence_classification_training(
         "execution_mode": "hf_peft_seqcls",
         "dataset_summary": _dataset_summary(dataset, len(train_split), len(validation_split)),
         "evaluation": {
-            "status_accuracy": round(float(metrics.get("eval_status_accuracy", 0.0)), 4),
-            "macro_f1": round(float(metrics.get("eval_macro_f1", 0.0)), 4),
-            "eval_loss": round(float(metrics.get("eval_loss", 0.0)), 4) if "eval_loss" in metrics else None,
+            "status_accuracy": _finite_metric(metrics.get("eval_status_accuracy"), 0.0),
+            "macro_f1": _finite_metric(metrics.get("eval_macro_f1"), 0.0),
+            "eval_loss": _finite_metric(metrics.get("eval_loss"), None) if "eval_loss" in metrics else None,
         },
     }
 
